@@ -5,6 +5,7 @@ require 'time'
 TIMESTAMP_PAT = '\d.+T.+Z'
 FILE_TIME_FMT = '%Y%m%dT%H%M%SZ'
 CMD_TIME_FMT = '%Y-%m-%dT%H:%M:%SZ'
+LAST_FILENAME = "last.txt"
 
 def log(msg)
   print msg
@@ -20,7 +21,7 @@ end
 
 def run(host, dir, out_root)
   last = log "reading last" do
-    `rclone cat #{out_root}/last`.yield_self do |s|
+    `rclone cat #{out_root}/#{LAST_FILENAME}`.yield_self do |s|
       if $?.success? && s =~ /^#{TIMESTAMP_PAT}$/
         Time.strptime(s+"UTC", FILE_TIME_FMT+"%Z")
       else
@@ -47,10 +48,10 @@ def run(host, dir, out_root)
 
     out = "#{out_root}/#{ts}"
     log "mkdir #{out}" do
-      system "rclone", "mkdir", out
+      system "rclone", "mkdir", out or raise "rclone mkdir failed"
     end
     log "copy #{dir} => #{out}" do
-      system "rclone", "copy", dir, out
+      system "rclone", "copy", dir, out or raise "rclone copy failed"
     end
   ensure
     log "rm -rf #{dir}" do
@@ -59,7 +60,7 @@ def run(host, dir, out_root)
   end
 
   log "writing last" do
-    IO.popen ["rclone", "rcat", "#{out_root}/last"], 'w' do |p|
+    IO.popen ["rclone", "rcat", "#{out_root}/#{LAST_FILENAME}"], 'w' do |p|
       p << ts
     end
   end
