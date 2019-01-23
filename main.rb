@@ -19,14 +19,18 @@ def log(msg)
   res
 end
 
-def run(host, dir, out_root)
-  last = log "reading last" do
-    `rclone cat #{out_root}/#{LAST_FILENAME}`.yield_self do |s|
-      if $?.success? && s =~ /^#{TIMESTAMP_PAT}$/
-        Time.strptime(s+"UTC", FILE_TIME_FMT+"%Z")
-      else
-        log "invalid last: %p (exit status: %s)" % [last, $?]
-        nil
+def run(host, dir, out_root, full: false)
+  last = if full
+    log "full backup, not reading last"
+  else
+    log "reading last" do
+      `rclone cat #{out_root}/#{LAST_FILENAME}`.yield_self do |s|
+        if $?.success? && s =~ /^#{TIMESTAMP_PAT}$/
+          Time.strptime(s+"UTC", FILE_TIME_FMT+"%Z")
+        else
+          log "invalid last: %p (exit status: %s)" % [last, $?]
+          nil
+        end
       end
     end
   end
@@ -69,4 +73,5 @@ end
 run \
   "localhost:8088",
   "/tmp/influxdb_backup",
-  "drive:backup/influxdb"
+  "drive:backup/influxdb",
+  full: ARGV.include?("--full")
