@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+root=`dirname "$0"`
+{
+  date \
+    && cd "$root" \
+    && bash -lc '
+      alerterr --name=influxdb-backup --on_ok -- \
+        flock /tmp/influxdb_backup.lock \
+          ruby main.rb "$@"
+    ' $0_c.sh "$@"
+} 2>&1 | tee /tmp/influxdb_backup.log
