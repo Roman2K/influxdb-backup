@@ -1,11 +1,15 @@
 require 'benchmark'
 require 'fileutils'
 require 'time'
+require 'date'
+require 'json'
 
 TIMESTAMP_PAT = '\d.+T.+Z'
+BACKUP_DIR_RE = /^#{TIMESTAMP_PAT}$/
 FILE_TIME_FMT = '%Y%m%dT%H%M%SZ'
 CMD_TIME_FMT = '%Y-%m-%dT%H:%M:%SZ'
 LAST_FILENAME = "last.txt"
+RETENTION_DAYS = 30
 
 def log(msg)
   print msg
@@ -20,6 +24,26 @@ def log(msg)
 end
 
 def run(host, dir, out_root, full: false)
+  del = log "getting backups older than %d days old" % RETENTION_DAYS do
+    today = Date.today
+    JSON.parse(`rclone lsjson "#{out_root}"`.tap {
+      $?.success? or raise "rclone lsjson failed"
+    }).select { |e|
+      e.fetch("IsDir") && e.fetch("Name") =~ BACKUP_DIR_RE or next false
+      date = Time.strptime(e.fetch("Name")+"UTC", FILE_TIME_FMT+"%Z").getlocal.
+        to_date
+      today - date > RETENTION_DAYS
+    }.map { |e|
+      "#{out_root}/#{e.fetch "Path"}"
+    }
+  end
+
+  del.sort.each do |dir|
+    log "deleting #{dir}" do
+      system "rclone", "purge", dir or raise "rclone purge failed"
+    end
+  end
+
   last = if full
     log "full backup, not reading last"
   else
