@@ -11,52 +11,39 @@ CMD_TIME_FMT = '%Y-%m-%dT%H:%M:%SZ'
 LAST_FILENAME = "last.txt"
 RETENTION_DAYS = 30
 
-def log(msg)
-  print msg
-  res = nil
-  if block_given?
-    print "... "
-    time = Benchmark.realtime { res = yield }
-    print "%.2fs" % time
-  end
-  print "\n"
-  res
-end
-
 def run(host, dir, out_root, full: false)
-  del = log "getting backups older than %d days old" % RETENTION_DAYS do
-    today = Date.today
+  today = Date.today
+  log("getting backups older than %d days old" % RETENTION_DAYS) {
     JSON.parse(`rclone lsjson "#{out_root}"`.tap {
       $?.success? or raise "rclone lsjson failed"
-    }).select { |e|
-      e.fetch("IsDir") && e.fetch("Name") =~ BACKUP_DIR_RE or next false
-      date = Time.strptime(e.fetch("Name")+"UTC", FILE_TIME_FMT+"%Z").getlocal.
-        to_date
-      today - date > RETENTION_DAYS
-    }.map { |e|
-      "#{out_root}/#{e.fetch "Path"}"
-    }
-  end
-
-  del.sort.each do |dir|
+    })
+  }.select { |e|
+    e.fetch("IsDir") && e.fetch("Name") =~ BACKUP_DIR_RE or next false
+    date = Time.strptime(e.fetch("Name")+"UTC", FILE_TIME_FMT+"%Z").getlocal.
+      to_date
+    today - date > RETENTION_DAYS
+  }.map { |e|
+    "#{out_root}/#{e.fetch "Path"}"
+  }.sort.each { |dir|
     log "deleting #{dir}" do
       system "rclone", "purge", dir or raise "rclone purge failed"
     end
-  end
+  }
 
   last = if full
     log "full backup, not reading last"
+    nil
   else
-    log "reading last" do
-      `rclone cat #{out_root}/#{LAST_FILENAME}`.yield_self do |s|
-        if $?.success? && s =~ /^#{TIMESTAMP_PAT}$/
-          Time.strptime(s+"UTC", FILE_TIME_FMT+"%Z")
-        else
-          log "invalid last: %p (exit status: %s)" % [last, $?]
-          nil
-        end
+    log("reading last") {
+      [`rclone cat "#{out_root}/#{LAST_FILENAME}"`, $?]
+    }.yield_self { |s, st|
+      if st.success? && s =~ /^#{TIMESTAMP_PAT}$/
+        Time.strptime(s+"UTC", FILE_TIME_FMT+"%Z")
+      else
+        log "invalid last: %p (exit status: %s)" % [last, st]
+        nil
       end
-    end
+    }
   end
 
   start = Time.now
@@ -92,6 +79,18 @@ def run(host, dir, out_root, full: false)
       p << ts
     end
   end
+end
+
+def log(msg)
+  print msg
+  res = nil
+  if block_given?
+    print "... "
+    time = Benchmark.realtime { res = yield }
+    print "%.2fs" % time
+  end
+  print "\n"
+  res
 end
 
 run \
