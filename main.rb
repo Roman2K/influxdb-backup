@@ -47,7 +47,7 @@ def run(host, dir, out_root, full: false)
   end
 
   start = Time.now
-  log "influxd backup (last: %p)" % last do
+  log "influxd backup (last: %p)" % last&.getlocal do
     system "influxd", "backup", "-portable", "-host", host,
       *(["-start", last.getutc.strftime(CMD_TIME_FMT)] if last),
       dir,
