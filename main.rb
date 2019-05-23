@@ -65,8 +65,8 @@ def run(host, dir, out_root, full: false)
     log "mkdir #{out}" do
       system "rclone", "mkdir", out or raise "rclone mkdir failed"
     end
-    log "copy #{dir} => #{out}" do
-      system "rclone", "copy", dir, out or raise "rclone copy failed"
+    log "move #{dir} => #{out}" do
+      system "rclone", "move", dir, out or raise "rclone move failed"
     end
   ensure
     log "rm -rf #{dir}" do
