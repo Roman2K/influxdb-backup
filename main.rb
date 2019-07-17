@@ -47,15 +47,15 @@ def run(host, dir, out_root, full: false)
   end
 
   start = Time.now
-  log "influxd backup (last: %p)" % last&.getlocal do
-    system "influxd", "backup", "-portable", "-host", host,
-      *(["-start", last.getutc.strftime(CMD_TIME_FMT)] if last),
-      dir,
-      out: "/dev/null" \
-        or raise "influxd backup failed"
-  end
-
   begin
+    log "influxd backup (last: %p)" % last&.getlocal do
+      system "influxd", "backup", "-portable", "-host", host,
+        *(["-start", last.getutc.strftime(CMD_TIME_FMT)] if last),
+        dir,
+        out: "/dev/null" \
+          or raise "influxd backup failed"
+    end
+
     ts = Dir.glob(File.join(dir, "*")).
       map { |f| File.basename(f)[/^(#{TIMESTAMP_PAT})\./, 1] }.
       compact.max \
