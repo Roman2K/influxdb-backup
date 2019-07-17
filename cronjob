@@ -5,8 +5,8 @@ root=`dirname "$0"`
   date \
     && cd "$root" \
     && bash -lc '
-      exec alerterr --name=influxdb-backup --on_out="full backup" -- \
+      exec alerterr --name=influxdb-backup --on_err="full backup" -- \
         flock /tmp/influxdb_backup.lock \
-          ruby main.rb "$@"
+          bundle exec ruby main.rb backup "$@" --min_df=2048
     ' $0_c.sh "$@"
 } 2>&1 | tee /tmp/influxdb_backup.log
