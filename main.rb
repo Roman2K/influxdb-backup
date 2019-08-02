@@ -1,3 +1,4 @@
+require 'pp'
 require 'benchmark'
 require 'fileutils'
 require 'time'
@@ -7,6 +8,7 @@ require 'utils'
 require 'metacli'
 
 module Cmds
+  ENV_PREFIX = "INFLUXBU_"
   TIMESTAMP_PAT = '\d.+T.+Z'
   BACKUP_DIR_RE = /^#{TIMESTAMP_PAT}$/
   FILE_TIME_FMT = '%Y%m%dT%H%M%SZ'
@@ -16,21 +18,32 @@ module Cmds
   DF_BLOCK_SIZE = 'M'
   DF_BLOCK_BYTES = 1024 * 1024
 
+  def self.env(key, default=nil, &transform)
+    transform ||= -> v { v }
+    val = ENV.fetch(ENV_PREFIX + key) { return default }
+    transform[val]
+  end
+
   def self.cmd_backup(
-    host: "localhost:8088",
-    dir: "/tmp/influxdb_backup",
-    out_root: "drive:backup/influxdb",
-    full: false,
-    min_df: nil
+    host: env("HOST", "influxdb:8088"),
+    dir: env("DIR", "/tmp/influxdb_backup"),
+    dest: env("DEST", "drive:backup/influxdb"),
+    full: env("FULL", false) { |v| v == "1" },
+    min_df: env("MIN_DF")
   )
     min_df = min_df&.to_f
 
     log = Utils::Log.new
     log.info "%s backup" % [full ? "full" : "incremental"]
+    log.debug "args: #{PP.pp(
+      Hash[method(__method__).parameters.map { |typ, var|
+        [var, eval(var.to_s)] if typ == :key
+      }.compact],
+    "").strip}"
 
     today = Date.today
     log.info("getting backups older than %d days old" % RETENTION_DAYS) {
-      JSON.parse(`rclone lsjson "#{out_root}"`.tap {
+      JSON.parse(`rclone lsjson "#{dest}"`.tap {
         $?.success? or raise "rclone lsjson failed"
       })
     }.select { |e|
@@ -39,7 +52,7 @@ module Cmds
         to_date
       today - date > RETENTION_DAYS
     }.map { |e|
-      "#{out_root}/#{e.fetch "Path"}"
+      "#{dest}/#{e.fetch "Path"}"
     }.sort.each { |dir|
       log.info "deleting #{dir}" do
         system "rclone", "purge", dir or raise "rclone purge failed"
@@ -47,13 +60,13 @@ module Cmds
     }
 
     last = log.info("reading last") {
-      [`rclone cat "#{out_root}/#{LAST_FILENAME}"`, $?]
+      [`rclone cat "#{dest}/#{LAST_FILENAME}"`, $?]
     }.yield_self { |s, st|
       unless st.success?
         log[exit: $?].error "failed to read last"
         break nil
       end
-      h = case s
+      case s
       when /^#{TIMESTAMP_PAT}$/
         {"ts" => s}
       else
@@ -61,10 +74,10 @@ module Cmds
           ks = %w(ts size)
           Hash === h && (h.keys & ks).size == ks.size or raise "invalid last"
         end
+      end.tap do |h|
+        h["time"] = Time.strptime(h.fetch("ts")+"UTC", FILE_TIME_FMT+"%Z")
+        log[last: h].info "read last"
       end
-    }.tap { |h|
-      h["time"] = Time.strptime(h.fetch("ts")+"UTC", FILE_TIME_FMT+"%Z")
-      log[last: h].info "read last"
     }
 
     if min_df && last && (sz = last["size"]&./(DF_BLOCK_BYTES))
@@ -90,9 +103,10 @@ module Cmds
             or raise "influxd backup failed"
       end
 
-      size = `du -b "#{dir}"`.tap { $?.success? or raise "du failed" } \
+      # `du -k` instead of `du -b` for compatibility with BusyBox du
+      size = `du -k "#{dir}"`.tap { $?.success? or raise "du failed" } \
         [/^(\d+)\s/,1].tap { |s| s or raise "unexpected du output" }.
-        to_i
+        to_i * 1024
       log[size: Utils::Fmt.size(size)].info "local backup finished"
 
       ts = Dir.glob(File.join(dir, "*")).
@@ -100,7 +114,7 @@ module Cmds
         compact.max \
           || start.getutc.strftime(FILE_TIME_FMT)
 
-      out = "#{out_root}/#{ts}"
+      out = "#{dest}/#{ts}"
       log.info "move #{dir} => #{out}" do
         system "rclone", "move", dir, out or raise "rclone move failed"
       end
@@ -111,7 +125,7 @@ module Cmds
     end
 
     log.info "writing last" do
-      IO.popen ["rclone", "rcat", "#{out_root}/#{LAST_FILENAME}"], 'w' do |p|
+      IO.popen ["rclone", "rcat", "#{dest}/#{LAST_FILENAME}"], 'w' do |p|
         JSON.dump({"ts" => ts, "size" => size}, p)
       end
     end
