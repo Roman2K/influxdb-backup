@@ -25,8 +25,9 @@ RUN wget -O /usr/bin/dumb-init https://github.com/Yelp/dumb-init/releases/downlo
   && chmod +x /usr/bin/dumb-init
 RUN wget -O /usr/bin/confd https://github.com/kelseyhightower/confd/releases/download/v0.16.0/confd-0.16.0-linux-amd64 \
   && chmod +x /usr/bin/confd
-COPY --from=builder /rclone/ /usr/bin/rclone
+COPY --from=builder /rclone /opt/rclone
 COPY --from=builder /influxbu /opt/influxbu
+COPY --from=builder /influxbu/docker/rclone /usr/bin/rclone
 COPY --from=builder /usr/local/bundle /usr/local/bundle
 COPY --from=builder /usr/sbin/influxd /usr/sbin
 
@@ -37,8 +38,9 @@ RUN addgroup -g 1000 -S influxbu \
   && chown -R influxbu: /opt/influxbu
 
 USER influxbu
-
-VOLUME /home/influxbu/.config/rclone/rclone.conf
+RUN cd \
+  && mkdir -p .config/rclone \
+  && chmod 700 .config
 
 WORKDIR /opt/influxbu
 ENTRYPOINT ["bundle", "exec", "ruby", "-I.", "main.rb", "backup"]

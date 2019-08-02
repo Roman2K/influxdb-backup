@@ -12,4 +12,4 @@ Environment variables:
 
 Volumes:
 
-* `/home/influxbu/.config/rclone/rclone.conf`
+* `/home/influxbu/rclone.conf`
