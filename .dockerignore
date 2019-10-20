@@ -1,4 +1,5 @@
 /.git
 /.bundle
+/Makefile
 /Dockerfile
 /.docker-compose
