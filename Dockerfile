@@ -21,8 +21,6 @@ RUN cd /influxbu && bundle
 # --- Runtime image
 FROM ruby:2.5.5-alpine3.10
 
-RUN wget -O /usr/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v1.2.2/dumb-init_1.2.2_amd64 \
-  && chmod +x /usr/bin/dumb-init
 RUN wget -O /usr/bin/confd https://github.com/kelseyhightower/confd/releases/download/v0.16.0/confd-0.16.0-linux-amd64 \
   && chmod +x /usr/bin/confd
 COPY --from=builder /rclone /opt/rclone

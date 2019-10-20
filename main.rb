@@ -14,7 +14,6 @@ module Cmds
   FILE_TIME_FMT = '%Y%m%dT%H%M%SZ'
   CMD_TIME_FMT = '%Y-%m-%dT%H:%M:%SZ'
   LAST_FILENAME = "last.txt"
-  RETENTION_DAYS = 30
   DF_BLOCK_SIZE = 'M'
   DF_BLOCK_BYTES = 1024 * 1024
 
@@ -29,10 +28,9 @@ module Cmds
     dir: env("DIR", "/tmp/influxdb_backup"),
     dest: env("DEST", "drive:backup/influxdb"),
     full: env("FULL", false) { |v| v == "1" },
-    min_df: env("MIN_DF")
+    min_df: env("MIN_DF", &:to_f),
+    retention_days: env("RETENTION", 30, &:to_i)
   )
-    min_df = min_df&.to_f
-
     log = Utils::Log.new
     log.info "%s backup" % [full ? "full" : "incremental"]
     log.debug "args: #{PP.pp(
@@ -42,7 +40,7 @@ module Cmds
     "").strip}"
 
     today = Date.today
-    log.info("getting backups older than %d days old" % RETENTION_DAYS) {
+    log.info("getting backups older than %d days old" % retention_days) {
       JSON.parse(`rclone lsjson "#{dest}"`.tap {
         $?.success? or raise "rclone lsjson failed"
       })
@@ -50,7 +48,7 @@ module Cmds
       e.fetch("IsDir") && e.fetch("Name") =~ BACKUP_DIR_RE or next false
       date = Time.strptime(e.fetch("Name")+"UTC", FILE_TIME_FMT+"%Z").getlocal.
         to_date
-      today - date > RETENTION_DAYS
+      today - date > retention_days
     }.map { |e|
       "#{dest}/#{e.fetch "Path"}"
     }.sort.each { |dir|
