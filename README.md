@@ -10,6 +10,7 @@ Environment variables:
 | INFLUXBU_FULL       | `"0"`                     |
 | INFLUXBU_MIN_DF     | -                         | Example: `"2048"` (MB)
 | INFLUXBU_RETENTION  | `"30"`                    | Number of days
+| INFLUXBU_DEBUG      | `"0"`                     |
 
 Volumes:
 

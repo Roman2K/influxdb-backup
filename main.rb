@@ -6,6 +6,7 @@ require 'date'
 require 'json'
 require 'utils'
 require 'metacli'
+require 'open3'
 
 module Cmds
   ENV_PREFIX = "INFLUXBU_"
@@ -29,9 +30,11 @@ module Cmds
     dest: env("DEST", "drive:backup/influxdb"),
     full: env("FULL", false) { |v| v == "1" },
     min_df: env("MIN_DF", &:to_f),
-    retention_days: env("RETENTION", 30, &:to_i)
+    retention_days: env("RETENTION", 30, &:to_i),
+    debug: env("DEBUG", false) { |v| v == "1" }
   )
     log = Utils::Log.new
+    log.level = :debug if debug
     log.info "%s backup" % [full ? "full" : "incremental"]
     log.debug "args: #{PP.pp(
       Hash[method(__method__).parameters.map { |typ, var|
@@ -123,9 +126,48 @@ module Cmds
     end
 
     log.info "writing last" do
-      IO.popen ["rclone", "rcat", "#{dest}/#{LAST_FILENAME}"], 'w' do |p|
-        JSON.dump({"ts" => ts, "size" => size}, p)
+      path = "#{dest}/#{LAST_FILENAME}"
+      flog = log[path]
+      retry_err /\(SSH_FX_PERMISSION_DENIED\)/, flog do |attempt|
+        if attempt > 1
+          flog.debug "known SFTP permission error, deleting before rcat" do
+            system "rclone", "delete", path
+          end
+        end
+        err, st = Open3.popen3 "rclone", "rcat", path do |i,o,e,t|
+          JSON.dump({"ts" => ts, "size" => size}, i)
+          i.close_write
+          [e.read, t.value]
+        end
+        st.success? or raise ExecError.new("rcat failed", err: err)
       end
+    end
+  end
+
+  class ExecError < StandardError
+    def initialize(msg, out: nil, err: nil)
+      super "%s stdout=%p stderr=%p" % [msg, out, err]
+      @out, @err = out, err
+    end
+    attr_reader :out, :err
+  end
+
+  def self.retry_err(re, log)
+    max = 2
+    cur = 0
+    loop do
+      cur += 1
+      curlog = log[cur: cur, max: max]
+      curlog.debug "attempting"
+      res = begin
+        yield cur
+      rescue ExecError => e
+        curlog[err: e].debug "exec error"
+        cur < max && [e.err, e.out].any? { |s| re === s } or raise
+        next
+      end
+      curlog[res: res].debug "success"
+      return res
     end
   end
 end
