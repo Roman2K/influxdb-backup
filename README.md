@@ -15,3 +15,15 @@ Environment variables:
 Volumes:
 
 * `/home/influxbu/rclone.conf`
+
+## Restore
+
+Example:
+
+```sh
+$ docker run \
+  -v $HOME/windrive/backup/influxdb:/backups:ro \
+  --network influx \
+  influxdb influxd restore -portable -host influxdb:8088 \
+    /backups/20200402T160031Z
+```
