@@ -29,7 +29,7 @@ COPY --from=builder /influxbu/docker/rclone /usr/bin/rclone
 COPY --from=builder /usr/local/bundle /usr/local/bundle
 COPY --from=builder /usr/sbin/influxd /usr/sbin
 
-RUN apk --update upgrade && apk add --no-cache ca-certificates
+RUN apk --update upgrade && apk add --no-cache ca-certificates bash
 
 RUN addgroup -g 1000 -S influxbu \
   && adduser -u 1000 -S influxbu -G influxbu \

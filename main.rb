@@ -13,7 +13,6 @@ module Cmds
   TIMESTAMP_PAT = '\d.+T.+Z'
   BACKUP_DIR_RE = /^#{TIMESTAMP_PAT}$/
   FILE_TIME_FMT = '%Y%m%dT%H%M%SZ'
-  CMD_TIME_FMT = '%Y-%m-%dT%H:%M:%SZ'
   LAST_FILENAME = "last.txt"
   DF_BLOCK_SIZE = 'M'
   DF_BLOCK_BYTES = 1024 * 1024
@@ -28,14 +27,13 @@ module Cmds
     host: env("HOST", "influxdb:8088"),
     dir: env("DIR", "/tmp/influxdb_backup"),
     dest: env("DEST", "drive:backup/influxdb"),
-    full: env("FULL", false) { |v| v == "1" },
     min_df: env("MIN_DF", &:to_f),
     retention_days: env("RETENTION", 30, &:to_i),
     debug: env("DEBUG", false) { |v| v == "1" }
   )
     log = Utils::Log.new
     log.level = :debug if debug
-    log.info "%s backup" % [full ? "full" : "incremental"]
+    log.info "full backup"
     log.debug "args: #{PP.pp(
       Hash[method(__method__).parameters.map { |typ, var|
         [var, eval(var.to_s)] if typ == :key
@@ -48,8 +46,8 @@ module Cmds
         $?.success? or raise "rclone lsjson failed"
       })
     }.select { |e|
-      e.fetch("IsDir") && e.fetch("Name") =~ BACKUP_DIR_RE or next false
-      date = Time.strptime(e.fetch("Name")+"UTC", FILE_TIME_FMT+"%Z").getlocal.
+      (name = e.fetch("Name").chomp(".tar")) =~ BACKUP_DIR_RE or next false
+      date = Time.strptime(name+"UTC", FILE_TIME_FMT+"%Z").getlocal.
         to_date
       today - date > retention_days
     }.map { |e|
@@ -94,14 +92,11 @@ module Cmds
     end
 
     start = Time.now
-    incr_start = last.fetch("time") if !full && last
     begin
-      log.info "influxd backup (start: %p)" % incr_start&.getlocal do
-        system "influxd", "backup", "-portable", "-host", host,
-          *(["-start", incr_start.getutc.strftime(CMD_TIME_FMT)] if incr_start),
-          dir,
+      log.info "influxd backup" do
+        system "influxd", "backup", "-portable", "-host", host, dir,
           out: "/dev/null" \
-            or raise "influxd backup failed"
+          or raise "influxd backup failed"
       end
 
       # `du -k` instead of `du -b` for compatibility with BusyBox du
@@ -115,9 +110,15 @@ module Cmds
         compact.max \
           || start.getutc.strftime(FILE_TIME_FMT)
 
-      out = "#{dest}/#{ts}"
-      log.info "move #{dir} => #{out}" do
-        system "rclone", "move", dir, out or raise "rclone move failed"
+      out = "#{dest}/#{ts}.tar"
+      log.info "tarring #{dir} => #{out}" do
+        tar dir do |tar|
+          IO.popen ["rclone", "rcat", out], 'w' do |rcat|
+            IO.copy_stream tar, rcat
+          end
+          $?.success? or raise "rclone rcat failed"
+        end
+        $?.success? or raise "tar failed"
       end
     ensure
       log.info "rm -rf #{dir}" do
@@ -142,6 +143,12 @@ module Cmds
         st.success? or raise ExecError.new("rcat failed", err: err)
       end
     end
+  end
+
+  def self.tar(f, &block)
+    dir = File.dirname f
+    f = File.basename f
+    IO.popen ["bash", "-c", "cd $1 && tar c $2", '_', dir, f], 'r', &block
   end
 
   class ExecError < StandardError
