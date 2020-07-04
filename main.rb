@@ -11,7 +11,6 @@ require 'open3'
 module Cmds
   ENV_PREFIX = "INFLUXBU_"
   TIMESTAMP_PAT = '\d.+T.+Z'
-  BACKUP_DIR_RE = /^#{TIMESTAMP_PAT}$/
   FILE_TIME_FMT = '%Y%m%dT%H%M%SZ'
   LAST_FILENAME = "last.txt"
   DF_BLOCK_SIZE = 'M'
@@ -28,7 +27,6 @@ module Cmds
     dir: env("DIR", "/tmp/influxdb_backup"),
     dest: env("DEST", "drive:backup/influxdb"),
     min_df: env("MIN_DF", &:to_f),
-    retention_days: env("RETENTION", 30, &:to_i),
     debug: env("DEBUG", false) { |v| v == "1" }
   )
     log = Utils::Log.new
@@ -40,24 +38,6 @@ module Cmds
       }.compact],
     "").strip}"
 
-    today = Date.today
-    log.info("getting backups older than %d days old" % retention_days) {
-      JSON.parse(`rclone lsjson "#{dest}"`.tap {
-        $?.success? or raise "rclone lsjson failed"
-      })
-    }.select { |e|
-      (name = e.fetch("Name").chomp(".tar")) =~ BACKUP_DIR_RE or next false
-      date = Time.strptime(name+"UTC", FILE_TIME_FMT+"%Z").getlocal.
-        to_date
-      today - date > retention_days
-    }.map { |e|
-      "#{dest}/#{e.fetch "Path"}"
-    }.sort.each { |dir|
-      log.info "deleting #{dir}" do
-        system "rclone", "purge", dir or raise "rclone purge failed"
-      end
-    }
-
     last = log.info("reading last") {
       [`rclone cat "#{dest}/#{LAST_FILENAME}"`, $?]
     }.yield_self { |s, st|
@@ -68,11 +48,15 @@ module Cmds
       case s
       when /^#{TIMESTAMP_PAT}$/
         {"ts" => s}
-      else
+      when /./
         JSON.load(s).tap do |h|
           ks = %w(ts size)
-          Hash === h && (h.keys & ks).size == ks.size or raise "invalid last"
+          Hash === h && (h.keys & ks).size == ks.size \
+            or raise "invalid last JSON"
         end
+      else
+        log[last: s.inspect].warn "invalid last"
+        break nil
       end.tap do |h|
         h["time"] = Time.strptime(h.fetch("ts")+"UTC", FILE_TIME_FMT+"%Z")
         log[last: h].info "read last"
